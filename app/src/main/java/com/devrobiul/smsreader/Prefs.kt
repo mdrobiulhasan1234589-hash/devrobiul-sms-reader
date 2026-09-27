@@ -1,0 +1,130 @@
+package com.devrobiul.smsreader
+
+import android.content.Context
+import android.content.SharedPreferences
+
+object Prefs {
+
+    private const val PREF_NAME = "devrobiul_sms_reader_prefs"
+
+    private const val KEY_FIREBASE_API_KEY = "firebase_api_key"
+    private const val KEY_FIREBASE_DB_URL = "firebase_db_url"
+    private const val KEY_FIREBASE_PROJECT_ID = "firebase_project_id"
+    private const val KEY_FIREBASE_APP_ID = "firebase_app_id"
+    private const val KEY_FIREBASE_SENDER_ID = "firebase_sender_id"
+    private const val KEY_DATA_PATH = "data_path"
+    private const val KEY_MONITORING = "monitoring_enabled"
+    private const val KEY_LAST_SMS_SUMMARY = "last_sms_summary"
+    private const val KEY_FILTER_BKASH = "filter_bkash"
+    private const val KEY_FILTER_NAGAD = "filter_nagad"
+    private const val KEY_FILTER_ROCKET = "filter_rocket"
+
+    private fun get(context: Context): SharedPreferences {
+        return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+    }
+
+    // ─── Firebase Config ───
+
+    fun getFirebaseApiKey(context: Context): String =
+        get(context).getString(KEY_FIREBASE_API_KEY, "") ?: ""
+
+    fun setFirebaseApiKey(context: Context, value: String) {
+        get(context).edit().putString(KEY_FIREBASE_API_KEY, value.trim()).apply()
+    }
+
+    fun getFirebaseDbUrl(context: Context): String =
+        get(context).getString(KEY_FIREBASE_DB_URL, "") ?: ""
+
+    fun setFirebaseDbUrl(context: Context, value: String) {
+        get(context).edit().putString(KEY_FIREBASE_DB_URL, value.trim()).apply()
+    }
+
+    fun getFirebaseProjectId(context: Context): String =
+        get(context).getString(KEY_FIREBASE_PROJECT_ID, "") ?: ""
+
+    fun setFirebaseProjectId(context: Context, value: String) {
+        get(context).edit().putString(KEY_FIREBASE_PROJECT_ID, value.trim()).apply()
+    }
+
+    fun getFirebaseAppId(context: Context): String =
+        get(context).getString(KEY_FIREBASE_APP_ID, "") ?: ""
+
+    fun setFirebaseAppId(context: Context, value: String) {
+        get(context).edit().putString(KEY_FIREBASE_APP_ID, value.trim()).apply()
+    }
+
+    fun getFirebaseSenderId(context: Context): String =
+        get(context).getString(KEY_FIREBASE_SENDER_ID, "") ?: ""
+
+    fun setFirebaseSenderId(context: Context, value: String) {
+        get(context).edit().putString(KEY_FIREBASE_SENDER_ID, value.trim()).apply()
+    }
+
+    // ─── Data Path ───
+
+    fun getDataPath(context: Context): String =
+        get(context).getString(KEY_DATA_PATH, "XNXANIKPAY") ?: "XNXANIKPAY"
+
+    fun setDataPath(context: Context, value: String) {
+        get(context).edit().putString(KEY_DATA_PATH, value.trim()).apply()
+    }
+
+    // ─── Monitoring State ───
+
+    fun isMonitoringEnabled(context: Context): Boolean =
+        get(context).getBoolean(KEY_MONITORING, true)
+
+    fun setMonitoringEnabled(context: Context, value: Boolean) {
+        get(context).edit().putBoolean(KEY_MONITORING, value).apply()
+    }
+
+    // ─── Last SMS Summary ───
+
+    fun getLastSmsSummary(context: Context): String =
+        get(context).getString(KEY_LAST_SMS_SUMMARY, "") ?: ""
+
+    fun setLastSmsSummary(context: Context, value: String) {
+        get(context).edit().putString(KEY_LAST_SMS_SUMMARY, value).apply()
+    }
+
+    // ─── Provider Filters ───
+
+    fun isBkashEnabled(context: Context): Boolean =
+        get(context).getBoolean(KEY_FILTER_BKASH, true)
+
+    fun setBkashEnabled(context: Context, value: Boolean) {
+        get(context).edit().putBoolean(KEY_FILTER_BKASH, value).apply()
+    }
+
+    fun isNagadEnabled(context: Context): Boolean =
+        get(context).getBoolean(KEY_FILTER_NAGAD, true)
+
+    fun setNagadEnabled(context: Context, value: Boolean) {
+        get(context).edit().putBoolean(KEY_FILTER_NAGAD, value).apply()
+    }
+
+    fun isRocketEnabled(context: Context): Boolean =
+        get(context).getBoolean(KEY_FILTER_ROCKET, true)
+
+    fun setRocketEnabled(context: Context, value: Boolean) {
+        get(context).edit().putBoolean(KEY_FILTER_ROCKET, value).apply()
+    }
+
+    // ─── Helpers ───
+
+    fun isFirebaseConfigured(context: Context): Boolean {
+        return getFirebaseApiKey(context).isNotBlank() &&
+                getFirebaseDbUrl(context).isNotBlank() &&
+                getFirebaseAppId(context).isNotBlank()
+    }
+
+    fun clearFirebaseConfig(context: Context) {
+        get(context).edit()
+            .remove(KEY_FIREBASE_API_KEY)
+            .remove(KEY_FIREBASE_DB_URL)
+            .remove(KEY_FIREBASE_PROJECT_ID)
+            .remove(KEY_FIREBASE_APP_ID)
+            .remove(KEY_FIREBASE_SENDER_ID)
+            .apply()
+    }
+}
