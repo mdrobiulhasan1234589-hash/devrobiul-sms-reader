@@ -3,10 +3,8 @@ package com.devrobiul.smsreader
 import android.content.Context
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
-import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ktx.database
 import com.google.firebase.ktx.Firebase
-import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -16,16 +14,19 @@ import java.util.Locale
  * (stored in Prefs) and pushes SMS data to Realtime Database.
  *
  * No google-services.json required. Firebase is initialized at runtime.
+ *
+ * Handles re-initialization properly: if [DEFAULT] app already exists with the
+ * same config, it reuses it. If config changed, it deletes and re-creates.
  */
 object FirebaseHelper {
 
-    private var isInitialized = false
     private var initializedDbUrl: String = ""
 
     /**
      * Initialize Firebase using the config stored in Prefs.
-     * Safe to call multiple times — will re-initialize if the config changed.
+     * Safe to call multiple times.
      */
+    @Synchronized
     fun initFirebase(context: Context): Boolean {
         try {
             val apiKey = Prefs.getFirebaseApiKey(context)
@@ -38,17 +39,26 @@ object FirebaseHelper {
                 return false
             }
 
-            // If already initialized with same DB URL, skip
-            if (isInitialized && initializedDbUrl == dbUrl && FirebaseApp.getApps(context).isNotEmpty()) {
-                return true
+            // Check if a [DEFAULT] app already exists
+            val existingApps = FirebaseApp.getApps(context)
+            val defaultApp = existingApps.firstOrNull { it.name == FirebaseApp.DEFAULT_APP_NAME }
+
+            if (defaultApp != null) {
+                // If the DB URL matches the cached one, reuse it
+                if (initializedDbUrl == dbUrl) {
+                    return true
+                }
+
+                // Config changed — delete the old [DEFAULT] instance and recreate
+                try {
+                    defaultApp.delete()
+                } catch (_: Exception) { }
             }
 
-            // Delete previous instances if config changed
+            // Delete any other named apps to avoid conflicts
             try {
                 FirebaseApp.getApps(context).forEach { app ->
-                    if (app.name != "[DEFAULT]") {
-                        app.delete()
-                    }
+                    try { app.delete() } catch (_: Exception) { }
                 }
             } catch (_: Exception) { }
 
@@ -62,8 +72,6 @@ object FirebaseHelper {
             FirebaseApp.initializeApp(context, options)
 
             initializedDbUrl = dbUrl
-            isInitialized = true
-
             LogManager.add(context, "INFO", "Firebase initialized — $projectId")
             return true
         } catch (e: Exception) {
@@ -75,8 +83,6 @@ object FirebaseHelper {
     /**
      * Push a parsed SMS record to the user's Firebase Realtime Database.
      * Path: /{dataPath}/{trxId}
-     *
-     * Returns true if the push succeeded.
      */
     fun pushSmsRecord(context: Context, sms: SmsParser.SmsData): Boolean {
         return try {
@@ -88,7 +94,6 @@ object FirebaseHelper {
             val database = Firebase.database
             val dataPath = Prefs.getDataPath(context)
 
-            // Build record
             val timeFormat = SimpleDateFormat("dd MMM yyyy, hh:mm:ss a", Locale.US)
             val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.US)
             val now = Date()
@@ -108,7 +113,6 @@ object FirebaseHelper {
             val ref = database.getReference(dataPath).child(sms.trxId)
             val task = ref.setValue(record)
 
-            // Wait for completion (with timeout behavior handled by Firebase)
             val latch = java.util.concurrent.CountDownLatch(1)
             var success = false
 
@@ -120,7 +124,6 @@ object FirebaseHelper {
                 latch.countDown()
             }
 
-            // Wait up to 8 seconds
             latch.await(8, java.util.concurrent.TimeUnit.SECONDS)
 
             if (success) {
@@ -173,8 +176,8 @@ object FirebaseHelper {
     /**
      * Reset cached initialization state (used when user changes config).
      */
+    @Synchronized
     fun reset() {
-        isInitialized = false
         initializedDbUrl = ""
     }
 }
