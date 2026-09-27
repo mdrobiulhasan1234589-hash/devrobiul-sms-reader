@@ -18,12 +18,12 @@ object Prefs {
     private const val KEY_FILTER_BKASH = "filter_bkash"
     private const val KEY_FILTER_NAGAD = "filter_nagad"
     private const val KEY_FILTER_ROCKET = "filter_rocket"
+    private const val KEY_FIREBASE_CONNECTED = "firebase_connected"
+    private const val KEY_FIREBASE_LAST_CHECK = "firebase_last_check"
 
     private fun get(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
     }
-
-    // ─── Firebase Config ───
 
     fun getFirebaseApiKey(context: Context): String =
         get(context).getString(KEY_FIREBASE_API_KEY, "") ?: ""
@@ -60,16 +60,12 @@ object Prefs {
         get(context).edit().putString(KEY_FIREBASE_SENDER_ID, value.trim()).apply()
     }
 
-    // ─── Data Path ───
-
     fun getDataPath(context: Context): String =
         get(context).getString(KEY_DATA_PATH, "XNXANIKPAY") ?: "XNXANIKPAY"
 
     fun setDataPath(context: Context, value: String) {
         get(context).edit().putString(KEY_DATA_PATH, value.trim()).apply()
     }
-
-    // ─── Monitoring State ───
 
     fun isMonitoringEnabled(context: Context): Boolean =
         get(context).getBoolean(KEY_MONITORING, true)
@@ -78,16 +74,12 @@ object Prefs {
         get(context).edit().putBoolean(KEY_MONITORING, value).apply()
     }
 
-    // ─── Last SMS Summary ───
-
     fun getLastSmsSummary(context: Context): String =
         get(context).getString(KEY_LAST_SMS_SUMMARY, "") ?: ""
 
     fun setLastSmsSummary(context: Context, value: String) {
         get(context).edit().putString(KEY_LAST_SMS_SUMMARY, value).apply()
     }
-
-    // ─── Provider Filters ───
 
     fun isBkashEnabled(context: Context): Boolean =
         get(context).getBoolean(KEY_FILTER_BKASH, true)
@@ -110,7 +102,21 @@ object Prefs {
         get(context).edit().putBoolean(KEY_FILTER_ROCKET, value).apply()
     }
 
-    // ─── Helpers ───
+    // ─── Firebase Connection Cache ───
+
+    fun isFirebaseConnected(context: Context): Boolean =
+        get(context).getBoolean(KEY_FIREBASE_CONNECTED, false)
+
+    fun setFirebaseConnected(context: Context, value: Boolean) {
+        get(context).edit().putBoolean(KEY_FIREBASE_CONNECTED, value).apply()
+    }
+
+    fun getFirebaseLastCheck(context: Context): Long =
+        get(context).getLong(KEY_FIREBASE_LAST_CHECK, 0L)
+
+    fun setFirebaseLastCheck(context: Context, value: Long) {
+        get(context).edit().putLong(KEY_FIREBASE_LAST_CHECK, value).apply()
+    }
 
     fun isFirebaseConfigured(context: Context): Boolean {
         return getFirebaseApiKey(context).isNotBlank() &&
@@ -125,6 +131,8 @@ object Prefs {
             .remove(KEY_FIREBASE_PROJECT_ID)
             .remove(KEY_FIREBASE_APP_ID)
             .remove(KEY_FIREBASE_SENDER_ID)
+            .remove(KEY_FIREBASE_CONNECTED)
+            .remove(KEY_FIREBASE_LAST_CHECK)
             .apply()
     }
 }
