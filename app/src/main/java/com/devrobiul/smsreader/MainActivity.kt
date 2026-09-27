@@ -60,7 +60,6 @@ class MainActivity : AppCompatActivity() {
             PaymentMonitorService.start(this)
         }
 
-        // Auto-test Firebase connection if config exists
         if (Prefs.isFirebaseConfigured(this)) {
             runFirebaseTestSilent()
         }
@@ -105,29 +104,23 @@ class MainActivity : AppCompatActivity() {
             refreshUiState()
         }
 
-        btnRequestSms.setOnClickListener {
-            requestSmsPermissionIfNeeded()
-        }
-
+        btnRequestSms.setOnClickListener { requestSmsPermissionIfNeeded() }
         btnTestConnection.setOnClickListener { runFirebaseTest() }
         btnSettings.setOnClickListener { showSettingsDialog() }
         btnLogs.setOnClickListener { showLogsDialog() }
-        btnHistory.setOnClickListener { showHistoryDialog() }
+        btnHistory.setOnClickListener { showLogsDialog() } // History = Logs
     }
 
     private fun refreshUiState() {
-        // SMS Permission
         val hasSms = hasSmsPermission()
         tvSmsPermissionStatus.text = if (hasSms) "GRANTED ✓" else "NOT GRANTED"
         tvSmsPermissionStatus.setTextColor(getColor(if (hasSms) R.color.status_ok else R.color.status_error))
 
-        // Service Status
         val monitoring = Prefs.isMonitoringEnabled(this)
         val serviceRunning = hasSms && monitoring && Prefs.isFirebaseConfigured(this)
         tvServiceStatus.text = if (serviceRunning) "RUNNING ✓" else "STOPPED"
         tvServiceStatus.setTextColor(getColor(if (serviceRunning) R.color.status_ok else R.color.status_error))
 
-        // Firebase Status
         if (Prefs.isFirebaseConfigured(this)) {
             if (tvFirebaseStatus.text.isNullOrBlank() ||
                 tvFirebaseStatus.text == "NOT CONFIGURED") {
@@ -224,7 +217,7 @@ class MainActivity : AppCompatActivity() {
             if (hasSmsPermission()) {
                 showToast("SMS permission granted ✓")
             } else {
-                showToast("SMS permission is required to read payment messages")
+                showToast("SMS permission is required")
             }
         }
     }
@@ -385,17 +378,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         dialog.show()
-    }
-
-    private fun showHistoryDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("History")
-            .setMessage(
-                "SMS history is available in the Logs screen.\n\n" +
-                        "Every parsed SMS is logged with method, amount, sender, and TrxID."
-            )
-            .setPositiveButton("OK", null)
-            .show()
     }
 
     private fun showToast(msg: String) {
