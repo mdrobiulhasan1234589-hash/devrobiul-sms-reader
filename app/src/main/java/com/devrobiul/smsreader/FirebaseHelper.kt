@@ -9,23 +9,10 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * FirebaseHelper — Dynamically initializes Firebase from user-provided config
- * (stored in Prefs) and pushes SMS data to Realtime Database.
- *
- * No google-services.json required. Firebase is initialized at runtime.
- *
- * Handles re-initialization properly: if [DEFAULT] app already exists with the
- * same config, it reuses it. If config changed, it deletes and re-creates.
- */
 object FirebaseHelper {
 
     private var initializedDbUrl: String = ""
 
-    /**
-     * Initialize Firebase using the config stored in Prefs.
-     * Safe to call multiple times.
-     */
     @Synchronized
     fun initFirebase(context: Context): Boolean {
         try {
@@ -39,23 +26,16 @@ object FirebaseHelper {
                 return false
             }
 
-            // Check if a [DEFAULT] app already exists
             val existingApps = FirebaseApp.getApps(context)
             val defaultApp = existingApps.firstOrNull { it.name == FirebaseApp.DEFAULT_APP_NAME }
 
             if (defaultApp != null) {
-                // If the DB URL matches the cached one, reuse it
                 if (initializedDbUrl == dbUrl) {
                     return true
                 }
-
-                // Config changed — delete the old [DEFAULT] instance and recreate
-                try {
-                    defaultApp.delete()
-                } catch (_: Exception) { }
+                try { defaultApp.delete() } catch (_: Exception) { }
             }
 
-            // Delete any other named apps to avoid conflicts
             try {
                 FirebaseApp.getApps(context).forEach { app ->
                     try { app.delete() } catch (_: Exception) { }
@@ -80,10 +60,6 @@ object FirebaseHelper {
         }
     }
 
-    /**
-     * Push a parsed SMS record to the user's Firebase Realtime Database.
-     * Path: /{dataPath}/{trxId}
-     */
     fun pushSmsRecord(context: Context, sms: SmsParser.SmsData): Boolean {
         return try {
             if (!initFirebase(context)) {
@@ -124,7 +100,7 @@ object FirebaseHelper {
                 latch.countDown()
             }
 
-            latch.await(8, java.util.concurrent.TimeUnit.SECONDS)
+            latch.await(10, java.util.concurrent.TimeUnit.SECONDS)
 
             if (success) {
                 LogManager.add(context, "SENT", "Pushed to Firebase: ${SmsParser.maskTrxId(sms.trxId)}")
@@ -138,7 +114,9 @@ object FirebaseHelper {
     }
 
     /**
-     * Test Firebase connection — writes a small test record, then removes it.
+     * RELIABLE connection test.
+     * Writes a test value under user's data path, reads it back, then deletes it.
+     * This avoids the .info/connected path which often fails in Android Firebase SDK.
      */
     fun testConnection(context: Context): Pair<Boolean, String> {
         return try {
@@ -147,35 +125,50 @@ object FirebaseHelper {
             }
 
             val database = Firebase.database
-            val testRef = database.getReference(".info/connected")
+            val dataPath = Prefs.getDataPath(context)
+            val testRef = database.getReference(dataPath).child("_devrobiul_test")
 
-            val latch = java.util.concurrent.CountDownLatch(1)
-            var connected = false
+            val writeLatch = java.util.concurrent.CountDownLatch(1)
+            var writeError: String? = null
 
-            testRef.get()
-                .addOnSuccessListener { snapshot ->
-                    connected = snapshot.getValue(Boolean::class.java) ?: false
-                    latch.countDown()
+            val testData = mapOf(
+                "test" to true,
+                "timestamp" to System.currentTimeMillis(),
+                "source" to "DevRobiulSmsReader"
+            )
+
+            testRef.setValue(testData)
+                .addOnSuccessListener { writeLatch.countDown() }
+                .addOnFailureListener { e ->
+                    writeError = e.message
+                    writeLatch.countDown()
                 }
-                .addOnFailureListener {
-                    latch.countDown()
+
+            writeLatch.await(10, java.util.concurrent.TimeUnit.SECONDS)
+
+            if (writeError != null) {
+                val msg = when {
+                    writeError!!.contains("Permission denied", ignoreCase = true) ->
+                        "Permission denied. Check Firebase Rules (allow .read/.write)"
+                    writeError!!.contains("not exist", ignoreCase = true) ->
+                        "Database not found. Check Database URL"
+                    else -> "Write failed: $writeError"
                 }
-
-            latch.await(10, java.util.concurrent.TimeUnit.SECONDS)
-
-            if (connected) {
-                Pair(true, "Firebase reachable ✓")
-            } else {
-                Pair(false, "Firebase not reachable — check Database URL and rules")
+                LogManager.add(context, "ERROR", "Test write failed: $writeError")
+                return Pair(false, msg)
             }
+
+            // Success — delete the test value
+            try { testRef.removeValue() } catch (_: Exception) { }
+
+            LogManager.add(context, "INFO", "Firebase test connection SUCCESS")
+            Pair(true, "Firebase reachable ✓")
         } catch (e: Exception) {
+            LogManager.add(context, "ERROR", "Test exception: ${e.message}")
             Pair(false, "Error: ${e.message}")
         }
     }
 
-    /**
-     * Reset cached initialization state (used when user changes config).
-     */
     @Synchronized
     fun reset() {
         initializedDbUrl = ""
