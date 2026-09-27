@@ -1,11 +1,5 @@
 package com.devrobiul.smsreader
 
-/**
- * SmsParser — Parses bKash / Nagad / Rocket SMS messages.
- * Extracts: method, amount, sender phone, TrxID.
- *
- * Safe against malformed input — returns null on any failure.
- */
 object SmsParser {
 
     data class SmsData(
@@ -16,25 +10,10 @@ object SmsParser {
         val originalMessage: String
     )
 
-    // Amount: "Tk 10.00" / "Tk. 10" / "BDT 10.00" / "৳10" / "10.00 Tk"
-    private val AMOUNT_REGEX = Regex(
-        """(?:Tk\.?|BDT\.?|৳)\s*([0-9]+(?:[.,][0-9]{1,2})?)""",
-        RegexOption.IGNORE_CASE
-    )
+    private val BKASH_KEYWORDS = listOf("bkash")
+    private val NAGAD_KEYWORDS = listOf("nagad")
+    private val ROCKET_KEYWORDS = listOf("rocket", "dbbl")
 
-    // Sender phone: Bangladeshi number 01XXXXXXXXX (11 digits)
-    private val SENDER_PHONE_REGEX = Regex(
-        """(?:from|sender|num(?:ber)?|phone)?\s*(01[3-9][0-9]{8})""",
-        RegexOption.IGNORE_CASE
-    )
-
-    // TrxID: "TrxID XXXXXXXXX" / "Txn ID: XXXX" / "Transaction ID XXXXX"
-    private val TRXID_REGEX = Regex(
-        """(?:trx\s*id|trxid|txn\s*id|txnid|transaction\s*id|transactionid)\s*[:\-]?\s*([A-Za-z0-9]{6,20})""",
-        RegexOption.IGNORE_CASE
-    )
-
-    // Phrases indicating received money (must contain at least one)
     private val RECEIVE_PHRASES = listOf(
         "you have received",
         "you've received",
@@ -49,7 +28,26 @@ object SmsParser {
         "পেয়েছি"
     )
 
-    fun parse(smsBody: String?): SmsData? {
+    private val AMOUNT_REGEX = Regex(
+        """(?:Tk\.?|BDT\.?|৳)\s*([0-9]+(?:[.,][0-9]{1,2})?)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val SENDER_PHONE_REGEX = Regex(
+        """(?:from|sender|num(?:ber)?|phone)?\s*(01[3-9][0-9]{8})""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val TRXID_REGEX = Regex(
+        """(?:trx\s*id|trxid|txn\s*id|txnid|transaction\s*id|transactionid)\s*[:\-]?\s*([A-Za-z0-9]{6,20})""",
+        RegexOption.IGNORE_CASE
+    )
+
+    /**
+     * Parse SMS. Returns SmsData or null.
+     * The optional [logFn] callback logs each step for debugging.
+     */
+    fun parse(smsBody: String?, logFn: ((String) -> Unit)? = null): SmsData? {
         return try {
             val combined = smsBody?.trim() ?: return null
             if (combined.isBlank()) return null
@@ -57,27 +55,60 @@ object SmsParser {
             val lower = combined.lowercase()
 
             // 1. Detect provider
-            val method = detectProvider(combined) ?: return null
+            val method = detectProvider(combined)
+            if (method == null) {
+                logFn?.invoke("Parser: no provider keyword found")
+                return null
+            }
+            logFn?.invoke("Parser: provider=$method")
 
             // 2. Confirm incoming payment
             val looksLikeReceive = RECEIVE_PHRASES.any { lower.contains(it.lowercase()) }
-            if (!looksLikeReceive) return null
+            if (!looksLikeReceive) {
+                logFn?.invoke("Parser: no receive phrase found")
+                return null
+            }
+            logFn?.invoke("Parser: receive phrase OK")
 
             // 3. Extract amount
-            val amountMatch = AMOUNT_REGEX.find(combined) ?: return null
+            val amountMatch = AMOUNT_REGEX.find(combined)
+            if (amountMatch == null) {
+                logFn?.invoke("Parser: amount regex no match")
+                return null
+            }
             val amountRaw = amountMatch.groupValues[1].replace(",", ".")
-            val amount = amountRaw.toDoubleOrNull() ?: return null
-            if (amount <= 0.0) return null
+            val amount = amountRaw.toDoubleOrNull()
+            if (amount == null || amount <= 0.0) {
+                logFn?.invoke("Parser: amount parse failed — '$amountRaw'")
+                return null
+            }
+            logFn?.invoke("Parser: amount=$amount")
 
             // 4. Extract sender phone
-            val senderMatch = SENDER_PHONE_REGEX.find(combined) ?: return null
+            val senderMatch = SENDER_PHONE_REGEX.find(combined)
+            if (senderMatch == null) {
+                logFn?.invoke("Parser: sender regex no match")
+                return null
+            }
             val senderPhone = senderMatch.groupValues[1]
-            if (senderPhone.length != 11) return null
+            if (senderPhone.length != 11) {
+                logFn?.invoke("Parser: sender length wrong — '$senderPhone'")
+                return null
+            }
+            logFn?.invoke("Parser: sender=$senderPhone")
 
             // 5. Extract TrxID
-            val trxMatch = TRXID_REGEX.find(combined) ?: return null
+            val trxMatch = TRXID_REGEX.find(combined)
+            if (trxMatch == null) {
+                logFn?.invoke("Parser: TrxID regex no match")
+                return null
+            }
             val trxId = trxMatch.groupValues[1].uppercase()
-            if (trxId.length < 6) return null
+            if (trxId.length < 6) {
+                logFn?.invoke("Parser: TrxID too short — '$trxId'")
+                return null
+            }
+            logFn?.invoke("Parser: TrxID=$trxId")
 
             SmsData(
                 method = method,
@@ -86,16 +117,17 @@ object SmsParser {
                 trxId = trxId,
                 originalMessage = combined
             )
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logFn?.invoke("Parser exception: ${e.message}")
             null
         }
     }
 
     private fun detectProvider(text: String): String? {
         val lower = text.lowercase()
-        if (lower.contains("bkash")) return "bkash"
-        if (lower.contains("nagad")) return "nagad"
-        if (lower.contains("rocket") || lower.contains("dbbl")) return "rocket"
+        if (BKASH_KEYWORDS.any { lower.contains(it) }) return "bkash"
+        if (NAGAD_KEYWORDS.any { lower.contains(it) }) return "nagad"
+        if (ROCKET_KEYWORDS.any { lower.contains(it) }) return "rocket"
         return null
     }
 
