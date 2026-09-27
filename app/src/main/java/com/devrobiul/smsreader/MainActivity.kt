@@ -42,6 +42,10 @@ class MainActivity : AppCompatActivity() {
     private val SMS_PERMISSION_CODE = 200
     private val NOTIF_PERMISSION_CODE = 201
 
+    // Cache the last successful test time to avoid rapid re-tests
+    private var lastTestTime = 0L
+    private val TEST_CACHE_MS = 60_000L // 1 minute
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -60,7 +64,10 @@ class MainActivity : AppCompatActivity() {
             PaymentMonitorService.start(this)
         }
 
-        if (Prefs.isFirebaseConfigured(this)) {
+        // Only auto-test if last test was more than 1 minute ago
+        val now = System.currentTimeMillis()
+        if (Prefs.isFirebaseConfigured(this) && (now - lastTestTime) > TEST_CACHE_MS) {
+            lastTestTime = now
             runFirebaseTestSilent()
         }
     }
@@ -108,7 +115,7 @@ class MainActivity : AppCompatActivity() {
         btnTestConnection.setOnClickListener { runFirebaseTest() }
         btnSettings.setOnClickListener { showSettingsDialog() }
         btnLogs.setOnClickListener { showLogsDialog() }
-        btnHistory.setOnClickListener { showLogsDialog() } // History = Logs
+        btnHistory.setOnClickListener { showLogsDialog() }
     }
 
     private fun refreshUiState() {
@@ -121,11 +128,21 @@ class MainActivity : AppCompatActivity() {
         tvServiceStatus.text = if (serviceRunning) "RUNNING ✓" else "STOPPED"
         tvServiceStatus.setTextColor(getColor(if (serviceRunning) R.color.status_ok else R.color.status_error))
 
+        // Show cached Firebase status immediately (no "CHECKING" flash)
         if (Prefs.isFirebaseConfigured(this)) {
-            if (tvFirebaseStatus.text.isNullOrBlank() ||
-                tvFirebaseStatus.text == "NOT CONFIGURED") {
-                tvFirebaseStatus.text = "CHECKING..."
-                tvFirebaseStatus.setTextColor(getColor(R.color.status_warn))
+            if (Prefs.isFirebaseConnected(this)) {
+                tvFirebaseStatus.text = "CONNECTED ✓"
+                tvFirebaseStatus.setTextColor(getColor(R.color.status_ok))
+            } else {
+                // Only show FAILED if we've actually done a test before
+                val lastCheck = Prefs.getFirebaseLastCheck(this)
+                if (lastCheck > 0) {
+                    tvFirebaseStatus.text = "FAILED"
+                    tvFirebaseStatus.setTextColor(getColor(R.color.status_error))
+                } else {
+                    tvFirebaseStatus.text = "NOT TESTED"
+                    tvFirebaseStatus.setTextColor(getColor(R.color.status_warn))
+                }
             }
         } else {
             tvFirebaseStatus.text = "NOT CONFIGURED"
@@ -222,6 +239,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Manual test (button click) — shows toast feedback.
+     */
     private fun runFirebaseTest() {
         tvFirebaseStatus.text = "TESTING..."
         tvFirebaseStatus.setTextColor(getColor(R.color.status_warn))
@@ -231,28 +251,34 @@ class MainActivity : AppCompatActivity() {
                 FirebaseHelper.testConnection(this@MainActivity)
             }
             withContext(Dispatchers.Main) {
+                Prefs.setFirebaseLastCheck(this@MainActivity, System.currentTimeMillis())
+                Prefs.setFirebaseConnected(this@MainActivity, success)
+
                 if (success) {
                     tvFirebaseStatus.text = "CONNECTED ✓"
                     tvFirebaseStatus.setTextColor(getColor(R.color.status_ok))
-                    showToast(message)
                 } else {
                     tvFirebaseStatus.text = "FAILED"
                     tvFirebaseStatus.setTextColor(getColor(R.color.status_error))
-                    showToast(message)
                 }
+                showToast(message)
             }
         }
     }
 
+    /**
+     * Silent auto-test (app resume) — no toast, no "CHECKING..." flash.
+     * Uses the cached value if recently tested.
+     */
     private fun runFirebaseTestSilent() {
-        tvFirebaseStatus.text = "CHECKING..."
-        tvFirebaseStatus.setTextColor(getColor(R.color.status_warn))
-
         activityScope.launch {
             val (success, _) = withContext(Dispatchers.IO) {
                 FirebaseHelper.testConnection(this@MainActivity)
             }
             withContext(Dispatchers.Main) {
+                Prefs.setFirebaseLastCheck(this@MainActivity, System.currentTimeMillis())
+                Prefs.setFirebaseConnected(this@MainActivity, success)
+
                 if (success) {
                     tvFirebaseStatus.text = "CONNECTED ✓"
                     tvFirebaseStatus.setTextColor(getColor(R.color.status_ok))
@@ -313,7 +339,11 @@ class MainActivity : AppCompatActivity() {
                 Prefs.setNagadEnabled(this, cbNagad.isChecked)
                 Prefs.setRocketEnabled(this, cbRocket.isChecked)
 
+                // Reset caches when config changes
                 FirebaseHelper.reset()
+                Prefs.setFirebaseConnected(this, false)
+                Prefs.setFirebaseLastCheck(this, 0L)
+                lastTestTime = 0L
 
                 LogManager.add(this, "INFO", "Firebase config updated")
                 refreshUiState()
@@ -324,6 +354,9 @@ class MainActivity : AppCompatActivity() {
             .setNeutralButton("Clear") { _, _ ->
                 Prefs.clearFirebaseConfig(this)
                 FirebaseHelper.reset()
+                Prefs.setFirebaseConnected(this, false)
+                Prefs.setFirebaseLastCheck(this, 0L)
+                lastTestTime = 0L
                 LogManager.add(this, "INFO", "Firebase config cleared")
                 refreshUiState()
                 showToast("Firebase config cleared")
