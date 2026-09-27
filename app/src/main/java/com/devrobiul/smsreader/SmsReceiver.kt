@@ -12,18 +12,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * SmsReceiver — Listens for incoming SMS messages via Android's system broadcast.
- *
- * This is the most reliable method: SMS arrives → BroadcastReceiver fires → parse → push to Firebase.
- * No notification delays, no silent notification issues, works even when app is closed.
- */
 class SmsReceiver : BroadcastReceiver() {
 
     companion object {
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-        // In-memory duplicate cache to avoid pushing same TrxID twice quickly
         private val recentTrxIds = LinkedHashMap<String, Long>()
         private const val TRX_MEMORY_WINDOW_MS = 5 * 60 * 1000L
         private const val MAX_RECENT = 100
@@ -33,16 +26,19 @@ class SmsReceiver : BroadcastReceiver() {
         try {
             if (intent?.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
 
-            // Check if monitoring is enabled
+            LogManager.add(context, "DEBUG", "📩 SmsReceiver fired")
+
             if (!Prefs.isMonitoringEnabled(context)) {
-                LogManager.add(context, "DEBUG", "SMS received but monitoring disabled")
+                LogManager.add(context, "DEBUG", "⚠️ Monitoring disabled — ignoring SMS")
                 return
             }
 
             val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent) ?: return
-            if (messages.isEmpty()) return
+            if (messages.isEmpty()) {
+                LogManager.add(context, "DEBUG", "Empty message list")
+                return
+            }
 
-            // Combine multi-part SMS into a single body
             val fullBodyBuilder = StringBuilder()
             var sender = ""
             for (msg in messages) {
@@ -51,30 +47,34 @@ class SmsReceiver : BroadcastReceiver() {
             }
 
             val fullBody = fullBodyBuilder.toString().trim()
-            if (fullBody.isBlank()) return
-
-            // Log raw SMS (truncated)
-            LogManager.add(
-                context,
-                "DEBUG",
-                "SMS from $sender: ${fullBody.take(120)}"
-            )
-
-            // Parse the SMS
-            val parsed = SmsParser.parse(fullBody)
-            if (parsed == null) {
-                // Not a payment SMS — ignore silently (only log at debug level)
+            if (fullBody.isBlank()) {
+                LogManager.add(context, "DEBUG", "Blank SMS body")
                 return
             }
 
-            // Apply provider filter
+            LogManager.add(
+                context,
+                "DEBUG",
+                "📨 SMS from $sender: ${fullBody.take(200)}"
+            )
+
+            val parsed = SmsParser.parse(fullBody) { logMsg ->
+                LogManager.add(context, "DEBUG", logMsg)
+            }
+
+            if (parsed == null) {
+                LogManager.add(context, "DEBUG", "❌ Parser returned NULL")
+                return
+            }
+
+            // Provider filter
             when (parsed.method) {
                 "bkash" -> if (!Prefs.isBkashEnabled(context)) return
                 "nagad" -> if (!Prefs.isNagadEnabled(context)) return
                 "rocket" -> if (!Prefs.isRocketEnabled(context)) return
             }
 
-            // Duplicate check (in-memory)
+            // Duplicate check
             val now = System.currentTimeMillis()
             pruneOldTrxIds(now)
 
@@ -91,7 +91,6 @@ class SmsReceiver : BroadcastReceiver() {
                 recentTrxIds[parsed.trxId] = now
             }
 
-            // Log parsed
             LogManager.add(
                 context,
                 "PARSED",
@@ -100,7 +99,6 @@ class SmsReceiver : BroadcastReceiver() {
                         "TrxID ${SmsParser.maskTrxId(parsed.trxId)}"
             )
 
-            // Push to Firebase in background
             scope.launch {
                 val success = FirebaseHelper.pushSmsRecord(context, parsed)
 
